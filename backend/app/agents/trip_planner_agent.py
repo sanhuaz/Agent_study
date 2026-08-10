@@ -1,12 +1,12 @@
 """多智能体旅行规划系统"""
 
 import json
-from typing import Dict, Any, List
 from hello_agents import SimpleAgent
 from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
 from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
 from ..config import get_settings
+from .trip_planner_graph import TripPlannerGraph
 
 # ============ Agent提示词 ============
 
@@ -214,6 +214,10 @@ class MultiAgentTripPlanner:
             print(f"   天气查询Agent: {len(self.weather_agent.list_tools())} 个工具")
             print(f"   酒店推荐Agent: {len(self.hotel_agent.list_tools())} 个工具")
 
+            # 编译一次固定的 LangGraph；节点复用上面已经创建的 Agent 和 MCPTool。
+            print("  - 编译旅行规划LangGraph...")
+            self.trip_planner_graph = TripPlannerGraph(self)
+
         except Exception as e:
             print(f"❌ 多智能体系统初始化失败: {str(e)}")
             import traceback
@@ -239,32 +243,8 @@ class MultiAgentTripPlanner:
             print(f"偏好: {', '.join(request.preferences) if request.preferences else '无'}")
             print(f"{'='*60}\n")
 
-            # 步骤1: 景点搜索Agent搜索景点
-            print("📍 步骤1: 搜索景点...")
-            attraction_query = self._build_attraction_query(request)
-            attraction_response = self.attraction_agent.run(attraction_query)
-            print(f"景点搜索结果: {attraction_response[:200]}...\n")
-
-            # 步骤2: 天气查询Agent查询天气
-            print("🌤️  步骤2: 查询天气...")
-            weather_query = f"请查询{request.city}的天气信息"
-            weather_response = self.weather_agent.run(weather_query)
-            print(f"天气查询结果: {weather_response[:200]}...\n")
-
-            # 步骤3: 酒店推荐Agent搜索酒店
-            print("🏨 步骤3: 搜索酒店...")
-            hotel_query = f"请搜索{request.city}的{request.accommodation}酒店"
-            hotel_response = self.hotel_agent.run(hotel_query)
-            print(f"酒店搜索结果: {hotel_response[:200]}...\n")
-
-            # 步骤4: 行程规划Agent整合信息生成计划
-            print("📋 步骤4: 生成行程计划...")
-            planner_query = self._build_planner_query(request, attraction_response, weather_response, hotel_response)
-            planner_response = self.planner_agent.run(planner_query)
-            print(f"行程规划结果: {planner_response[:300]}...\n")
-
-            # 解析最终计划
-            trip_plan = self._parse_response(planner_response, request)
+            # Graph 内部保持原有固定顺序：景点 → 天气 → 酒店 → 规划 → 解析。
+            trip_plan = self.trip_planner_graph.invoke(request)
 
             print(f"{'='*60}")
             print(f"✅ 旅行计划生成完成!")
@@ -427,4 +407,3 @@ def get_trip_planner_agent() -> MultiAgentTripPlanner:
         _multi_agent_planner = MultiAgentTripPlanner()
 
     return _multi_agent_planner
-

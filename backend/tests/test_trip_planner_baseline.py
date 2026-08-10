@@ -33,6 +33,7 @@ sys.modules.setdefault("hello_agents.tools", hello_agents_tools_stub)
 
 
 from app.agents.trip_planner_agent import MultiAgentTripPlanner  # noqa: E402
+from app.agents.trip_planner_graph import TripPlannerGraph  # noqa: E402
 from app.models.schemas import TripPlan, TripRequest  # noqa: E402
 
 
@@ -139,6 +140,8 @@ def make_planner(
     planner.planner_agent = FakeAgent(
         "planner", calls, planner_response or valid_plan_json()
     )
+    # 生产入口切换后仍使用同一套旧行为断言验证 Graph 等价性。
+    planner.trip_planner_graph = TripPlannerGraph(planner)
     return planner
 
 
