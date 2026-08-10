@@ -1,6 +1,9 @@
 # HelloAgents框架
 hello-agents[protocols]>=0.2.4,<=0.2.9
 
+# LangGraph工作流编排
+langgraph>=1.1.2,<1.2.0
+
 # FastAPI和相关依赖
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
