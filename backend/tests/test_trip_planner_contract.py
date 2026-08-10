@@ -108,12 +108,11 @@ class TripPlannerContractTests(unittest.TestCase):
 
     def test_api_path_method_and_models_are_unchanged(self) -> None:
         plan_route = next(route for route in trip_route.router.routes if route.path == "/trip/plan")
-        application_route = next(
-            route for route in fastapi_app.routes if route.path == "/api/trip/plan"
-        )
+        openapi_paths = fastapi_app.openapi()["paths"]
 
         self.assertEqual(plan_route.methods, {"POST"})
-        self.assertEqual(application_route.methods, {"POST"})
+        self.assertIn("/api/trip/plan", openapi_paths)
+        self.assertIn("post", openapi_paths["/api/trip/plan"])
         self.assertIs(plan_route.response_model, TripPlanResponse)
         self.assertEqual(
             list(TripRequest.model_fields),

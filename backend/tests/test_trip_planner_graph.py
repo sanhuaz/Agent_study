@@ -78,6 +78,7 @@ class RecordingAgent:
 class FakeDependencies:
     def __init__(self, attraction_error: Exception | None = None) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.parse_error: Exception | None = None
         self.attraction_agent = RecordingAgent(
             "attraction", self.calls, "景点原始结果", attraction_error
         )
@@ -102,6 +103,8 @@ class FakeDependencies:
         return f"{request.city}|{attractions}|{weather}|{hotels}"
 
     def _parse_response(self, response: str, request: TripRequest) -> TripPlan:
+        if self.parse_error is not None:
+            raise self.parse_error
         return TripPlan(**json.loads(response))
 
 
@@ -162,18 +165,45 @@ class TripPlannerGraphTests(unittest.TestCase):
         )
         self.assertEqual(result.city, "杭州")
 
-    def test_node_error_is_logged_and_reraised_without_extra_calls(self) -> None:
-        dependencies = FakeDependencies(RuntimeError("景点服务失败"))
-        workflow = TripPlannerGraph(dependencies)
+    def test_every_node_error_is_logged_reraised_and_stops_flow(self) -> None:
+        cases = [
+            ("attraction", "景点搜索", ["attraction"]),
+            ("weather", "天气查询", ["attraction", "weather"]),
+            ("hotel", "酒店推荐", ["attraction", "weather", "hotel"]),
+            (
+                "planner",
+                "行程规划",
+                ["attraction", "weather", "hotel", "planner"],
+            ),
+            (
+                "parse",
+                "结果解析",
+                ["attraction", "weather", "hotel", "planner"],
+            ),
+        ]
 
-        stdout = io.StringIO()
-        with redirect_stdout(stdout), self.assertRaisesRegex(
-            RuntimeError, "景点服务失败"
-        ):
-            workflow.invoke(make_request())
+        for failing_node, log_name, expected_calls in cases:
+            with self.subTest(node=failing_node):
+                dependencies = FakeDependencies()
+                error = RuntimeError(f"{log_name}失败")
+                if failing_node == "parse":
+                    dependencies.parse_error = error
+                else:
+                    getattr(dependencies, f"{failing_node}_agent").error = error
+                workflow = TripPlannerGraph(dependencies)
 
-        self.assertEqual([name for name, _ in dependencies.calls], ["attraction"])
-        self.assertIn("节点[景点搜索]执行失败: 景点服务失败", stdout.getvalue())
+                stdout = io.StringIO()
+                with redirect_stdout(stdout), self.assertRaisesRegex(
+                    RuntimeError, f"{log_name}失败"
+                ):
+                    workflow.invoke(make_request())
+
+                self.assertEqual(
+                    [name for name, _ in dependencies.calls], expected_calls
+                )
+                self.assertIn(
+                    f"节点[{log_name}]执行失败: {log_name}失败", stdout.getvalue()
+                )
 
 
 if __name__ == "__main__":
