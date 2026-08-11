@@ -4,6 +4,7 @@ import json
 from hello_agents import SimpleAgent
 from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
+from ..services.amap_service import resolve_uvx_command
 from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
 from ..config import get_settings
 from .trip_planner_graph import TripPlannerGraph
@@ -163,16 +164,20 @@ class MultiAgentTripPlanner:
             settings = get_settings()
             self.llm = get_llm()
 
-            # 创建共享的MCP工具(只创建一次)
+            # 创建共享的MCP工具(只创建一次)，并固定使用当前后端环境的 uvx。
             print("  - 创建共享MCP工具...")
             self.amap_tool = MCPTool(
                 name="amap",
                 description="高德地图服务",
-                server_command=["uvx", "amap-mcp-server"],
+                server_command=[resolve_uvx_command(), "amap-mcp-server"],
                 env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
                 auto_expand=True
             )
             self.amap_tool.expandable=True
+
+            # 工具发现失败时终止初始化，避免后续 Agent 用模型补写天气、景点和酒店。
+            if not self.amap_tool._available_tools:
+                raise RuntimeError("高德地图 MCP 服务已启动，但没有发现任何可用工具")
 
             # 创建景点搜索Agent
             print("  - 创建景点搜索Agent...")

@@ -97,6 +97,7 @@ class FakeMCPTool:
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
         self.expandable = False
+        self._available_tools = [{"name": "maps_weather"}]
         self.__class__.instances.append(self)
 
 
@@ -172,6 +173,7 @@ class TripPlannerContractTests(unittest.TestCase):
             patch.object(agent_module, "get_settings", return_value=fake_settings),
             patch.object(agent_module, "SimpleAgent", FakeSimpleAgent),
             patch.object(agent_module, "MCPTool", FakeMCPTool),
+            patch.object(agent_module, "resolve_uvx_command", return_value="uvx"),
             patch.object(agent_module, "TripPlannerGraph", graph_factory),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
