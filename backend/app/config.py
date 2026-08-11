@@ -34,10 +34,6 @@ class Settings(BaseSettings):
     # 高德地图API配置
     amap_api_key: str = ""
 
-    # Unsplash API配置
-    unsplash_access_key: str = ""
-    unsplash_secret_key: str = ""
-
     # LLM配置 (从环境变量读取,由HelloAgents管理)
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
@@ -108,4 +104,3 @@ def print_config():
     print(f"LLM Base URL: {llm_base_url}")
     print(f"LLM Model: {llm_model}")
     print(f"日志级别: {settings.log_level}")
-
