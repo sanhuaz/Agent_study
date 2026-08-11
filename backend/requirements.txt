@@ -1,8 +1,8 @@
-# HelloAgents框架
-hello-agents[protocols]>=0.2.4,<=0.2.9
-
-# LangGraph工作流编排
+# LangGraph工作流与Agent子图
 langgraph>=1.1.2,<1.2.0
+
+# OpenAI兼容模型客户端
+openai>=1.109.1,<2.0.0
 
 # FastAPI和相关依赖
 fastapi>=0.115.0

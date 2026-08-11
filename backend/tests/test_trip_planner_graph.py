@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import json
 import sys
-import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -14,15 +13,6 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-
-hello_agents_stub = types.ModuleType("hello_agents")
-hello_agents_stub.SimpleAgent = type("SimpleAgent", (), {})
-hello_agents_stub.HelloAgentsLLM = type("HelloAgentsLLM", (), {})
-hello_agents_tools_stub = types.ModuleType("hello_agents.tools")
-hello_agents_tools_stub.MCPTool = type("MCPTool", (), {})
-sys.modules.setdefault("hello_agents", hello_agents_stub)
-sys.modules.setdefault("hello_agents.tools", hello_agents_tools_stub)
-
 
 from app.agents.trip_planner_graph import TripPlannerGraph  # noqa: E402
 from app.models.schemas import TripPlan, TripRequest  # noqa: E402

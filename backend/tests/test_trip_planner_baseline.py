@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import io
 import sys
-import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -19,17 +18,6 @@ from typing import Callable
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-
-
-# 原模块在导入阶段引用 HelloAgents 类型。基线测试不测试初始化，因此使用
-# 最小替身隔离外部依赖，确保测试绝不会启动 MCP 子进程或真实 LLM。
-hello_agents_stub = types.ModuleType("hello_agents")
-hello_agents_stub.SimpleAgent = type("SimpleAgent", (), {})
-hello_agents_stub.HelloAgentsLLM = type("HelloAgentsLLM", (), {})
-hello_agents_tools_stub = types.ModuleType("hello_agents.tools")
-hello_agents_tools_stub.MCPTool = type("MCPTool", (), {})
-sys.modules.setdefault("hello_agents", hello_agents_stub)
-sys.modules.setdefault("hello_agents.tools", hello_agents_tools_stub)
 
 
 from app.agents.trip_planner_agent import MultiAgentTripPlanner  # noqa: E402

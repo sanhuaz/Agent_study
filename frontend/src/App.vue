@@ -10,7 +10,7 @@
         <router-view />
       </a-layout-content>
       <a-layout-footer style="text-align: center">
-        HelloAgents智能旅行助手 ©2025 基于HelloAgents框架
+        HelloAgents智能旅行助手 ©2025 基于LangGraph框架
       </a-layout-footer>
     </a-layout>
   </div>
@@ -25,4 +25,3 @@
     'Noto Sans', sans-serif;
 }
 </style>
-

@@ -16,15 +16,6 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-hello_agents_stub = types.ModuleType("hello_agents")
-hello_agents_stub.SimpleAgent = type("SimpleAgent", (), {})
-hello_agents_stub.HelloAgentsLLM = type("HelloAgentsLLM", (), {})
-hello_agents_tools_stub = types.ModuleType("hello_agents.tools")
-hello_agents_tools_stub.MCPTool = type("MCPTool", (), {})
-sys.modules.setdefault("hello_agents", hello_agents_stub)
-sys.modules.setdefault("hello_agents.tools", hello_agents_tools_stub)
-
-
 from app.agents import trip_planner_agent as agent_module  # noqa: E402
 from app.api.main import app as fastapi_app  # noqa: E402
 from app.api.routes import trip as trip_route  # noqa: E402
@@ -74,38 +65,37 @@ class RaisingPlanner:
         raise RuntimeError("未预期的服务错误")
 
 
-class FakeSimpleAgent:
-    instances: list["FakeSimpleAgent"] = []
+class FakeLangGraphAgent:
+    instances: list["FakeLangGraphAgent"] = []
 
-    def __init__(self, name, llm, system_prompt) -> None:
+    def __init__(self, name, llm, system_prompt, tool_client=None) -> None:
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
-        self.tools: list[object] = []
+        self.tool_client = tool_client
         self.__class__.instances.append(self)
 
-    def add_tool(self, tool) -> None:
-        self.tools.append(tool)
-
-    def list_tools(self) -> list[object]:
-        return self.tools
+    def list_tools(self) -> list[str]:
+        return self.tool_client.list_tools() if self.tool_client else []
 
 
-class FakeMCPTool:
-    instances: list["FakeMCPTool"] = []
+class FakeStdioMCPClient:
+    instances: list["FakeStdioMCPClient"] = []
 
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
-        self.expandable = False
         self._available_tools = [{"name": "maps_weather"}]
         self.__class__.instances.append(self)
+
+    def list_tools(self) -> list[str]:
+        return ["amap_maps_weather"]
 
 
 class TripPlannerContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         agent_module._multi_agent_planner = None
-        FakeSimpleAgent.instances.clear()
-        FakeMCPTool.instances.clear()
+        FakeLangGraphAgent.instances.clear()
+        FakeStdioMCPClient.instances.clear()
 
     def test_api_path_method_and_models_are_unchanged(self) -> None:
         plan_route = next(route for route in trip_route.router.routes if route.path == "/trip/plan")
@@ -171,8 +161,8 @@ class TripPlannerContractTests(unittest.TestCase):
         with (
             patch.object(agent_module, "get_llm", return_value=fake_llm),
             patch.object(agent_module, "get_settings", return_value=fake_settings),
-            patch.object(agent_module, "SimpleAgent", FakeSimpleAgent),
-            patch.object(agent_module, "MCPTool", FakeMCPTool),
+            patch.object(agent_module, "LangGraphAgent", FakeLangGraphAgent),
+            patch.object(agent_module, "StdioMCPClient", FakeStdioMCPClient),
             patch.object(agent_module, "resolve_uvx_command", return_value="uvx"),
             patch.object(agent_module, "TripPlannerGraph", graph_factory),
             redirect_stdout(io.StringIO()),
@@ -182,13 +172,15 @@ class TripPlannerContractTests(unittest.TestCase):
             second = agent_module.get_trip_planner_agent()
 
         self.assertIs(first, second)
-        self.assertEqual(len(FakeSimpleAgent.instances), 4)
-        self.assertTrue(all(agent.llm is fake_llm for agent in FakeSimpleAgent.instances))
-        self.assertEqual(len(FakeMCPTool.instances), 1)
-        shared_tool = FakeMCPTool.instances[0]
+        self.assertEqual(len(FakeLangGraphAgent.instances), 4)
+        self.assertTrue(
+            all(agent.llm is fake_llm for agent in FakeLangGraphAgent.instances)
+        )
+        self.assertEqual(len(FakeStdioMCPClient.instances), 1)
+        shared_tool = FakeStdioMCPClient.instances[0]
         self.assertEqual(
-            [agent.tools for agent in FakeSimpleAgent.instances],
-            [[shared_tool], [shared_tool], [shared_tool], []],
+            [agent.tool_client for agent in FakeLangGraphAgent.instances],
+            [shared_tool, shared_tool, shared_tool, None],
         )
         self.assertTrue(shared_tool.kwargs["auto_expand"])
         self.assertEqual(shared_tool.kwargs["server_command"], ["uvx", "amap-mcp-server"])

@@ -1,12 +1,12 @@
 """多智能体旅行规划系统"""
 
 import json
-from hello_agents import SimpleAgent
-from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
 from ..services.amap_service import resolve_uvx_command
+from ..services.mcp_client import StdioMCPClient
 from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
 from ..config import get_settings
+from .langgraph_agent import LangGraphAgent
 from .trip_planner_graph import TripPlannerGraph
 
 # ============ Agent提示词 ============
@@ -166,14 +166,12 @@ class MultiAgentTripPlanner:
 
             # 创建共享的MCP工具(只创建一次)，并固定使用当前后端环境的 uvx。
             print("  - 创建共享MCP工具...")
-            self.amap_tool = MCPTool(
+            self.amap_tool = StdioMCPClient(
                 name="amap",
-                description="高德地图服务",
                 server_command=[resolve_uvx_command(), "amap-mcp-server"],
                 env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
                 auto_expand=True
             )
-            self.amap_tool.expandable=True
 
             # 工具发现失败时终止初始化，避免后续 Agent 用模型补写天气、景点和酒店。
             if not self.amap_tool._available_tools:
@@ -181,34 +179,34 @@ class MultiAgentTripPlanner:
 
             # 创建景点搜索Agent
             print("  - 创建景点搜索Agent...")
-            self.attraction_agent = SimpleAgent(
+            self.attraction_agent = LangGraphAgent(
                 name="景点搜索专家",
                 llm=self.llm,
-                system_prompt=ATTRACTION_AGENT_PROMPT
+                system_prompt=ATTRACTION_AGENT_PROMPT,
+                tool_client=self.amap_tool,
             )
-            self.attraction_agent.add_tool(self.amap_tool)
 
             # 创建天气查询Agent
             print("  - 创建天气查询Agent...")
-            self.weather_agent = SimpleAgent(
+            self.weather_agent = LangGraphAgent(
                 name="天气查询专家",
                 llm=self.llm,
-                system_prompt=WEATHER_AGENT_PROMPT
+                system_prompt=WEATHER_AGENT_PROMPT,
+                tool_client=self.amap_tool,
             )
-            self.weather_agent.add_tool(self.amap_tool)
 
             # 创建酒店推荐Agent
             print("  - 创建酒店推荐Agent...")
-            self.hotel_agent = SimpleAgent(
+            self.hotel_agent = LangGraphAgent(
                 name="酒店推荐专家",
                 llm=self.llm,
-                system_prompt=HOTEL_AGENT_PROMPT
+                system_prompt=HOTEL_AGENT_PROMPT,
+                tool_client=self.amap_tool,
             )
-            self.hotel_agent.add_tool(self.amap_tool)
 
             # 创建行程规划Agent(不需要工具)
             print("  - 创建行程规划Agent...")
-            self.planner_agent = SimpleAgent(
+            self.planner_agent = LangGraphAgent(
                 name="行程规划专家",
                 llm=self.llm,
                 system_prompt=PLANNER_AGENT_PROMPT
@@ -219,7 +217,7 @@ class MultiAgentTripPlanner:
             print(f"   天气查询Agent: {len(self.weather_agent.list_tools())} 个工具")
             print(f"   酒店推荐Agent: {len(self.hotel_agent.list_tools())} 个工具")
 
-            # 编译一次固定的 LangGraph；节点复用上面已经创建的 Agent 和 MCPTool。
+            # 编译一次固定的主 Graph；节点复用上面已经编译的 Agent 子图和 MCP 客户端。
             print("  - 编译旅行规划LangGraph...")
             self.trip_planner_graph = TripPlannerGraph(self)
 

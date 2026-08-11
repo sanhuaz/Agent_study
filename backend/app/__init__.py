@@ -1,4 +1,3 @@
-"""HelloAgents智能旅行助手 - 后端应用"""
+"""LangGraph 智能旅行助手后端应用。"""
 
 __version__ = "1.0.0"
-

@@ -4,9 +4,9 @@ from pathlib import Path
 import shutil
 import sys
 from typing import List, Dict, Any, Optional
-from hello_agents.tools import MCPTool
 from ..config import get_settings
 from ..models.schemas import Location, POIInfo, WeatherInfo
+from .mcp_client import StdioMCPClient
 
 # 全局MCP工具实例
 _amap_mcp_tool = None
@@ -28,12 +28,12 @@ def resolve_uvx_command() -> str:
     )
 
 
-def get_amap_mcp_tool() -> MCPTool:
+def get_amap_mcp_tool() -> StdioMCPClient:
     """
     获取高德地图MCP工具实例(单例模式)
     
     Returns:
-        MCPTool实例
+        StdioMCPClient实例
     """
     global _amap_mcp_tool
     
@@ -44,15 +44,14 @@ def get_amap_mcp_tool() -> MCPTool:
             raise ValueError("高德地图API Key未配置,请在.env文件中设置AMAP_API_KEY")
         
         # 使用当前 Python 环境中的 uvx，确保从任意启动方式都能找到 MCP 服务。
-        amap_mcp_tool = MCPTool(
+        amap_mcp_tool = StdioMCPClient(
             name="amap",
-            description="高德地图服务,支持POI搜索、路线规划、天气查询等功能",
             server_command=[resolve_uvx_command(), "amap-mcp-server"],
             env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
             auto_expand=True  # 自动展开为独立工具
         )
 
-        # HelloAgents 会吞掉 MCP 发现异常；这里阻止空工具继续产生伪造数据。
+        # 工具发现异常会转为空列表；这里阻止模型在无真实工具时继续生成数据。
         if not amap_mcp_tool._available_tools:
             raise RuntimeError("高德地图 MCP 服务已启动，但没有发现任何可用工具")
 
