@@ -36,7 +36,7 @@ app.include_router(map_routes.router, prefix="/api")
 async def startup_event():
     """应用启动事件"""
     print("\n" + "="*60)
-    print(f"🚀 {settings.app_name} v{settings.app_version}")
+    print(f"{settings.app_name} v{settings.app_version}")
     print("="*60)
     
     # 打印配置信息

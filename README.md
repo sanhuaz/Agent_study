@@ -146,19 +146,35 @@ git clone https://github.com/sanhuaz/Agent_study.git
 Set-Location ".\Agent_study"
 ```
 
-### 1. 启动后端
+除克隆命令外，下面各段命令均从仓库根目录执行。后端和前端需要分别在两个 PowerShell 窗口运行。
+
+### 1. 首次配置后端
 
 ```powershell
 Set-Location ".\backend"
 
 python -m venv .venv
-& ".\.venv\Scripts\Activate.ps1"
-python -m pip install -r requirements.txt
+& ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
 
 Copy-Item ".\.env.example" ".\.env"
 # 编辑 .env，填入自己的模型和高德地图配置
 
-python -m uvicorn app.api.main:app `
+Set-Location ".."
+```
+
+### 2. 启动后端
+
+```powershell
+Set-Location ".\backend"
+
+# 避免 Windows GBK 控制台无法输出日志中的 Unicode 字符
+$env:PYTHONIOENCODING = "utf-8"
+
+# 为 uvx/amap-mcp-server 使用当前用户可写的独立缓存目录
+$env:LOCALAPPDATA = Join-Path $env:TEMP "agent-study-localappdata"
+New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+
+& ".\.venv\Scripts\python.exe" -m uvicorn app.api.main:app `
   --host 0.0.0.0 `
   --port 8000 `
   --log-level info
@@ -170,10 +186,10 @@ python -m uvicorn app.api.main:app `
 - Swagger 文档：`http://127.0.0.1:8000/docs`
 - 健康检查：`http://127.0.0.1:8000/health`
 
-### 2. 启动前端
+### 3. 首次配置并启动前端
 
 ```powershell
-Set-Location "..\frontend"
+Set-Location ".\frontend"
 
 npm install
 Copy-Item ".\.env.example" ".\.env.local"
@@ -183,6 +199,15 @@ npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 访问：`http://127.0.0.1:5173`
+
+完成首次配置后，日常启动前端只需执行：
+
+```powershell
+Set-Location ".\frontend"
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+停止服务时，在对应窗口按 `Ctrl+C`。
 
 ## 环境变量
 
