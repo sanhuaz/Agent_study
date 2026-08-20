@@ -53,6 +53,29 @@ class FakeToolClient:
 
 
 class LangGraphAgentTests(unittest.TestCase):
+    def test_explicit_tool_call_skips_redundant_model_decision(self) -> None:
+        llm = FakeLLM(["景点最终回答"])
+        tools = FakeToolClient()
+        agent = LangGraphAgent("景点搜索专家", llm, "景点提示词", tools)
+
+        result = agent.run(
+            "请搜索杭州景点\n"
+            "[TOOL_CALL:amap_maps_text_search:keywords=历史文化,city=杭州,limit=3]"
+        )
+
+        self.assertEqual(result, "景点最终回答")
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(
+            tools.calls,
+            [
+                (
+                    "amap_maps_text_search",
+                    {"keywords": "历史文化", "city": "杭州", "limit": 3},
+                )
+            ],
+        )
+        self.assertIn("工具返回的景点数据", llm.calls[0][-1]["content"])
+
     def test_tool_loop_keeps_text_protocol_and_injects_result(self) -> None:
         llm = FakeLLM(
             [

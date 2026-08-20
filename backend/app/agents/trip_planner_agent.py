@@ -4,7 +4,7 @@ import json
 from ..services.llm_service import get_llm
 from ..services.amap_service import resolve_uvx_command
 from ..services.mcp_client import StdioMCPClient
-from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
+from ..models.schemas import TripRequest, TripPlan
 from ..config import get_settings
 from .langgraph_agent import LangGraphAgent
 from .trip_planner_graph import TripPlannerGraph
@@ -246,7 +246,7 @@ class MultiAgentTripPlanner:
             print(f"偏好: {', '.join(request.preferences) if request.preferences else '无'}")
             print(f"{'='*60}\n")
 
-            # Graph 内部保持原有固定顺序：景点 → 天气 → 酒店 → 规划 → 解析。
+            # Graph 并行获取景点、天气和酒店后，再调用规划 Agent。
             trip_plan = self.trip_planner_graph.invoke(request)
 
             print(f"{'='*60}")
@@ -259,7 +259,7 @@ class MultiAgentTripPlanner:
             print(f"❌ 生成旅行计划失败: {str(e)}")
             import traceback
             traceback.print_exc()
-            return self._create_fallback_plan(request)
+            raise
     
     def _build_attraction_query(self, request: TripRequest) -> str:
         """构建景点搜索查询 - 直接包含工具调用"""
@@ -348,54 +348,7 @@ class MultiAgentTripPlanner:
             
         except Exception as e:
             print(f"⚠️  解析响应失败: {str(e)}")
-            print(f"   将使用备用方案生成计划")
-            return self._create_fallback_plan(request)
-    
-    def _create_fallback_plan(self, request: TripRequest) -> TripPlan:
-        """创建备用计划(当Agent失败时)"""
-        from datetime import datetime, timedelta
-        
-        # 解析日期
-        start_date = datetime.strptime(request.start_date, "%Y-%m-%d")
-        
-        # 创建每日行程
-        days = []
-        for i in range(request.travel_days):
-            current_date = start_date + timedelta(days=i)
-            
-            day_plan = DayPlan(
-                date=current_date.strftime("%Y-%m-%d"),
-                day_index=i,
-                description=f"第{i+1}天行程",
-                transportation=request.transportation,
-                accommodation=request.accommodation,
-                attractions=[
-                    Attraction(
-                        name=f"{request.city}景点{j+1}",
-                        address=f"{request.city}市",
-                        location=Location(longitude=116.4 + i*0.01 + j*0.005, latitude=39.9 + i*0.01 + j*0.005),
-                        visit_duration=120,
-                        description=f"这是{request.city}的著名景点",
-                        category="景点"
-                    )
-                    for j in range(2)
-                ],
-                meals=[
-                    Meal(type="breakfast", name=f"第{i+1}天早餐", description="当地特色早餐"),
-                    Meal(type="lunch", name=f"第{i+1}天午餐", description="午餐推荐"),
-                    Meal(type="dinner", name=f"第{i+1}天晚餐", description="晚餐推荐")
-                ]
-            )
-            days.append(day_plan)
-        
-        return TripPlan(
-            city=request.city,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            days=days,
-            weather_info=[],
-            overall_suggestions=f"这是为您规划的{request.city}{request.travel_days}日游行程,建议提前查看各景点的开放时间。"
-        )
+            raise
 
 
 # 全局多智能体系统实例

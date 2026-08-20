@@ -1,8 +1,8 @@
 # LangGraph 多智能体旅行规划助手 🌍✈️
 
-基于 LangGraph 构建的多智能体旅行规划应用。系统根据目的地、日期、交通方式、住宿偏好和旅行偏好，依次完成景点搜索、天气查询、酒店推荐与多日行程生成，并通过 Vue 3 页面展示地图、景点图片、每日安排和预算信息。
+基于 LangGraph 构建的多智能体旅行规划应用。系统根据目的地、日期、交通方式、住宿偏好和旅行偏好，并行完成景点搜索、天气查询和酒店推荐，再生成多日行程，通过 Vue 3 页面展示地图、景点图片、每日安排和预算信息。
 
-当前版本：`v0.3.0`
+当前版本：`v0.4.0`
 
 ## 功能概览
 
@@ -12,8 +12,8 @@
 - 使用 OpenAI 兼容接口接入大语言模型
 - 使用 FastAPI 提供类型安全的 HTTP API
 - 使用 Vue 3、TypeScript 和 Ant Design Vue 构建前端
-- 支持高德地图展示、POI 图片、预算信息和结果导出
-- Agent 或结果解析失败时保留原有备用计划机制
+- 支持高德地图展示、POI 图片和预算信息
+- Agent、MCP、模型或结果解析失败时直接返回失败，不生成占位计划
 
 ## 四个 Agent
 
@@ -34,9 +34,11 @@ flowchart TD
     F --> G[旅行规划主 LangGraph]
 
     G --> A[景点搜索节点]
-    A --> W[天气查询节点]
-    W --> H[酒店推荐节点]
-    H --> P[行程规划节点]
+    G --> W[天气查询节点]
+    G --> H[酒店推荐节点]
+    A --> P[行程规划节点]
+    W --> P
+    H --> P
     P --> R[JSON 解析节点]
 
     A --> AG1[景点 Agent 子图]
@@ -59,15 +61,17 @@ flowchart TD
     PLAN --> V
 ```
 
-旅行主流程是固定串行图：
+旅行主流程是固定图：
 
 ```text
-START → 景点搜索 → 天气查询 → 酒店推荐 → 行程规划 → JSON 解析 → END
+                    ┌→ 景点搜索 ─┐
+START ───────────────┼→ 天气查询 ──┼→ 行程规划 → JSON 解析 → END
+                    └→ 酒店推荐 ─┘
 ```
 
-每个 Agent 也是一个已编译的 LangGraph 子图。带工具的 Agent 会执行“模型判断 → MCP 工具调用 → 工具结果回填 → 模型回答”的循环，工具调用最多执行三轮。
+每个 Agent 也是一个已编译的 LangGraph 子图。带工具的 Agent 收到明确工具指令时会直接调用 MCP；没有明确工具指令时才由模型选择工具。工具结果回填后由模型生成回答，工具调用最多执行三轮。
 
-> 当前项目没有并行节点、自动重试、Checkpointer、长期记忆、人工确认或流式进度，请勿将这些能力视为已经实现。
+> 当前项目没有自动重试、Checkpointer、长期记忆、人工确认或流式进度；三个数据 Agent 的并行执行已由主 LangGraph 实现。
 
 ## 技术栈
 
@@ -89,17 +93,16 @@ START → 景点搜索 → 天气查询 → 酒店推荐 → 行程规划 → JS
 - Ant Design Vue
 - Axios
 - 高德地图 JavaScript API
-- html2canvas、jsPDF
 
 ## 项目结构
 
 ```text
-Agent_study/
+Travel_Plan/
 ├── backend/
 │   ├── app/
 │   │   ├── agents/
 │   │   │   ├── langgraph_agent.py       # Agent 状态、节点和工具循环子图
-│   │   │   ├── trip_planner_agent.py    # 提示词、依赖初始化、解析和备用计划
+│   │   │   ├── trip_planner_agent.py    # 提示词、依赖初始化和结果解析
 │   │   │   └── trip_planner_graph.py    # 旅行规划主 StateGraph
 │   │   ├── api/
 │   │   │   ├── main.py                  # FastAPI 应用入口
@@ -142,8 +145,8 @@ Agent_study/
 以下命令使用 PowerShell。
 
 ```powershell
-git clone https://github.com/sanhuaz/Agent_study.git
-Set-Location ".\Agent_study"
+git clone https://github.com/sanhuaz/Travel_Plan.git
+Set-Location ".\Travel_Plan"
 ```
 
 除克隆命令外，下面各段命令均从仓库根目录执行。后端和前端需要分别在两个 PowerShell 窗口运行。
@@ -172,7 +175,8 @@ $env:PYTHONIOENCODING = "utf-8"
 
 # 为 uvx/amap-mcp-server 使用当前用户可写的独立缓存目录
 $env:LOCALAPPDATA = Join-Path $env:TEMP "agent-study-localappdata"
-New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+$env:APPDATA = Join-Path $env:TEMP "agent-study-appdata"
+New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:APPDATA | Out-Null
 
 & ".\.venv\Scripts\python.exe" -m uvicorn app.api.main:app `
   --host 0.0.0.0 `
@@ -238,10 +242,10 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 1. 在首页填写目的地、日期、交通方式、住宿偏好和旅行偏好。
 2. 前端向 `POST /api/trip/plan` 提交 `TripRequest`。
-3. LangGraph 按固定顺序调用景点、天气、酒店和规划 Agent。
+3. LangGraph 并行调用景点、天气和酒店 Agent，三者完成后调用规划 Agent。
 4. 规划 Agent 返回 JSON，解析节点将其校验为 `TripPlan`。
 5. 前端展示每日行程、天气、酒店、餐饮、预算、地图和景点图片。
-6. Agent 执行或 JSON 解析失败时，后端返回原有备用计划。
+6. Agent 执行或 JSON 解析失败时，后端返回 HTTP 500，前端显示生成失败。
 
 ## 主要 API
 
@@ -272,12 +276,30 @@ python -m pytest -q
 - `pip check` 未发现依赖冲突
 - Vite 直接生产构建完成，共转换 3482 个模块
 - 没有执行真实 LLM 与高德地图端到端调用
+- v0.4.0 离线回归：`22 passed, 11 subtests passed`
+
+### v0.4.0 真实端到端测速
+
+测试日期：`2026-08-21`。测试使用模型 `deepseek-v4-flash`、相同广州一日游请求、相同已预热的 `uvx/amap-mcp-server` 缓存和全新后端进程。计时范围为发送 `POST /api/trip/plan` 到收到完整 HTTP 响应；表中有效样本均返回 HTTP 200、`success=true` 和非占位 `TripPlan`。
+
+固定请求：广州，`2026-09-01`，1 天，公共交通，经济型酒店，偏好“历史文化/美食”，额外要求“步行不要太多”。
+
+| 样本 | 工作流 | 完整响应耗时 | 结果 |
+|---|---|---:|---|
+| v0.3.0 串行基准 | 景点 → 天气 → 酒店 → 规划 | 95.20 秒 | 有效计划 |
+| v0.4.0 首次并行样本 | 景点/天气/酒店并行 → 规划 | 251.54 秒 | 有效计划，外部长尾样本 |
+| v0.4.0 计时诊断样本 | 景点/天气/酒店并行 → 规划 | 55.71 秒 | 有效计划 |
+| v0.4.0 最终优化样本 | 明确工具直达 + 三 Agent 并行 → 规划 | 70.10 秒 | 有效计划 |
+
+计时诊断确认 LangGraph 会并发启动三个数据 Agent。高德 MCP 单次调用约为 `1.5～2.4` 秒，主要耗时来自模型调用和最终 JSON 生成。优化后，明确写在请求中的工具调用会直接进入工具节点，不再先调用模型重复判断；三个数据 Agent 的模型调用总数由 6 次降为 3 次，完整流程由约 7 次降为 4 次。同时关闭 OpenAI SDK 默认的两次隐式重试，使超时或限流按照项目既有失败语义直接返回失败，避免把失败请求放大到数分钟。
+
+最终优化样本相对串行基准的计算结果为：`(95.20 - 70.10) / 95.20 × 100% = 26.37%`。分阶段计时显示，最终样本的并行数据阶段为 `17.01` 秒、规划阶段为 `50.95` 秒。诊断过程中相同代码仍出现过 `55.71` 秒和 `75.22` 秒的有效样本，说明外部模型生成速度存在明显波动；以上数据是单次真实端到端样本和问题定位记录，不是多轮统计平均值。
 
 ## 已知边界
 
-- 4个 Agent 当前固定串行执行，完整响应时间受模型和高德服务网络状况影响。
-- Graph 没有节点级重试、并行查询、持久化、流式进度或中断恢复。
-- `plan_trip()` 发生异常时会返回备用计划，现有 API 仍可能把备用计划标记为成功。
+- 三个数据 Agent 并行执行，但完整响应时间仍受最慢分支、行程规划模型调用和高德服务网络状况影响。
+- Graph 没有节点级自动重试、持久化、流式进度或中断恢复。
+- `plan_trip()` 或结果解析发生异常时，API 返回 HTTP 500，不再返回备用计划或占位数据。
 - `AmapService` 的部分结构化地图接口仍保留占位解析逻辑；旅行主流程直接消费 MCP 文本结果。
 - 前端完整 `npm run build` 仍受既有 TypeScript 类型问题影响；Vite 直接生产构建已验证通过。
 
@@ -286,6 +308,7 @@ python -m pytest -q
 - `v0.1.0`：使用 LangGraph 显式编排旅行规划主流程。
 - `v0.2.0`：修复 MCP 工具发现，迁移高德 POI 图片源并清理敏感配置。
 - `v0.3.0`：将4个 Agent 改造为 LangGraph 子图，使用 OpenAI SDK 与 FastMCP 完全移除 HelloAgents 运行时依赖。
+- `v0.4.0`：并行执行景点、天气和酒店 Agent；明确工具调用直接进入工具节点并关闭模型 SDK 隐式重试；移除备用计划与结果导出功能。
 
 ## 致谢
 

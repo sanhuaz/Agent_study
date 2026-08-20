@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -52,28 +53,41 @@ class RecordingAgent:
         calls: list[tuple[str, str]],
         response: str,
         error: Exception | None = None,
+        start_barrier: threading.Barrier | None = None,
     ) -> None:
         self.name = name
         self.calls = calls
         self.response = response
         self.error = error
+        self.start_barrier = start_barrier
 
     def run(self, query: str) -> str:
         self.calls.append((self.name, query))
+        if self.start_barrier is not None:
+            self.start_barrier.wait(timeout=2)
         if self.error is not None:
             raise self.error
         return self.response
 
 
 class FakeDependencies:
-    def __init__(self, attraction_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        attraction_error: Exception | None = None,
+        parallel_agents: bool = False,
+    ) -> None:
         self.calls: list[tuple[str, str]] = []
         self.parse_error: Exception | None = None
+        start_barrier = threading.Barrier(3) if parallel_agents else None
         self.attraction_agent = RecordingAgent(
-            "attraction", self.calls, "景点原始结果", attraction_error
+            "attraction", self.calls, "景点原始结果", attraction_error, start_barrier
         )
-        self.weather_agent = RecordingAgent("weather", self.calls, "天气原始结果")
-        self.hotel_agent = RecordingAgent("hotel", self.calls, "酒店原始结果")
+        self.weather_agent = RecordingAgent(
+            "weather", self.calls, "天气原始结果", start_barrier=start_barrier
+        )
+        self.hotel_agent = RecordingAgent(
+            "hotel", self.calls, "酒店原始结果", start_barrier=start_barrier
+        )
         self.planner_agent = RecordingAgent("planner", self.calls, plan_json())
 
     def _build_attraction_query(self, request: TripRequest) -> str:
@@ -135,8 +149,8 @@ class TripPlannerGraphTests(unittest.TestCase):
         self.assertEqual(set(planner), {"planner_response"})
         self.assertEqual(set(parsed), {"trip_plan"})
 
-    def test_compiled_graph_runs_fixed_serial_flow_once(self) -> None:
-        dependencies = FakeDependencies()
+    def test_compiled_graph_runs_three_data_agents_in_parallel_then_planner(self) -> None:
+        dependencies = FakeDependencies(parallel_agents=True)
         workflow = TripPlannerGraph(dependencies)
         compiled_graph = workflow.compiled_graph
 
@@ -144,42 +158,29 @@ class TripPlannerGraphTests(unittest.TestCase):
 
         self.assertIs(workflow.compiled_graph, compiled_graph)
         self.assertEqual(
-            [name for name, _ in dependencies.calls],
-            ["attraction", "weather", "hotel", "planner"],
+            {name for name, _ in dependencies.calls[:3]},
+            {"attraction", "weather", "hotel"},
         )
-        self.assertEqual(dependencies.calls[1][1], "请查询杭州的天气信息")
-        self.assertEqual(dependencies.calls[2][1], "请搜索杭州的经济型酒店")
+        self.assertEqual(dependencies.calls[-1][0], "planner")
+        self.assertIn("景点原始结果", dependencies.calls[-1][1])
+        self.assertIn("天气原始结果", dependencies.calls[-1][1])
+        self.assertIn("酒店原始结果", dependencies.calls[-1][1])
         self.assertEqual(
-            dependencies.calls[3][1],
-            "杭州|景点原始结果|天气原始结果|酒店原始结果",
+            len(dependencies.calls),
+            4,
         )
         self.assertEqual(result.city, "杭州")
 
-    def test_every_node_error_is_logged_reraised_and_stops_flow(self) -> None:
-        cases = [
-            ("attraction", "景点搜索", ["attraction"]),
-            ("weather", "天气查询", ["attraction", "weather"]),
-            ("hotel", "酒店推荐", ["attraction", "weather", "hotel"]),
-            (
-                "planner",
-                "行程规划",
-                ["attraction", "weather", "hotel", "planner"],
-            ),
-            (
-                "parse",
-                "结果解析",
-                ["attraction", "weather", "hotel", "planner"],
-            ),
-        ]
-
-        for failing_node, log_name, expected_calls in cases:
+    def test_data_agent_error_is_reraised_and_planner_does_not_run(self) -> None:
+        for failing_node, log_name in [
+            ("attraction", "景点搜索"),
+            ("weather", "天气查询"),
+            ("hotel", "酒店推荐"),
+        ]:
             with self.subTest(node=failing_node):
                 dependencies = FakeDependencies()
                 error = RuntimeError(f"{log_name}失败")
-                if failing_node == "parse":
-                    dependencies.parse_error = error
-                else:
-                    getattr(dependencies, f"{failing_node}_agent").error = error
+                getattr(dependencies, f"{failing_node}_agent").error = error
                 workflow = TripPlannerGraph(dependencies)
 
                 stdout = io.StringIO()
@@ -188,9 +189,28 @@ class TripPlannerGraphTests(unittest.TestCase):
                 ):
                     workflow.invoke(make_request())
 
-                self.assertEqual(
-                    [name for name, _ in dependencies.calls], expected_calls
+                self.assertNotIn("planner", [name for name, _ in dependencies.calls])
+                self.assertIn(
+                    f"节点[{log_name}]执行失败: {log_name}失败", stdout.getvalue()
                 )
+
+    def test_planner_and_parse_errors_are_reraised(self) -> None:
+        for failing_node, log_name in [("planner", "行程规划"), ("parse", "结果解析")]:
+            with self.subTest(node=failing_node):
+                dependencies = FakeDependencies()
+                error = RuntimeError(f"{log_name}失败")
+                if failing_node == "parse":
+                    dependencies.parse_error = error
+                else:
+                    dependencies.planner_agent.error = error
+                workflow = TripPlannerGraph(dependencies)
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout), self.assertRaisesRegex(
+                    RuntimeError, f"{log_name}失败"
+                ):
+                    workflow.invoke(make_request())
+
                 self.assertIn(
                     f"节点[{log_name}]执行失败: {log_name}失败", stdout.getvalue()
                 )

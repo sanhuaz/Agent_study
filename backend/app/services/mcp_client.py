@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
+from time import perf_counter
 from typing import Any, TypeVar
 
 from fastmcp import Client
@@ -87,6 +88,7 @@ class StdioMCPClient:
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
         internal_name = self._internal_name(tool_name)
+        started_at = perf_counter()
 
         async def call() -> Any:
             async with Client(self._new_transport()) as client:
@@ -94,6 +96,11 @@ class StdioMCPClient:
                 return self._extract_content(result)
 
         result = _run_async(call)
+        print(
+            "[PERF][MCP] "
+            f"tool={internal_name} elapsed={perf_counter() - started_at:.2f}s "
+            f"result_chars={len(str(result))}"
+        )
         return f"工具 '{internal_name}' 执行结果:\n{result}"
 
     def run(self, parameters: dict[str, Any]) -> str:

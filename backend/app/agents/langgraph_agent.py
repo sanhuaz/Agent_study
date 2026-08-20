@@ -74,7 +74,11 @@ class LangGraphAgent:
         builder.add_node("finish", self.finish_node)
 
         builder.add_edge(START, "prepare")
-        builder.add_edge("prepare", "model")
+        builder.add_conditional_edges(
+            "prepare",
+            self.route_after_prepare,
+            {"tools": "tools", "model": "model"},
+        )
         builder.add_conditional_edges(
             "model",
             self.route_after_model,
@@ -93,7 +97,23 @@ class LangGraphAgent:
         messages = [{"role": "system", "content": self._enhanced_system_prompt()}]
         messages.extend(state.get("history", []))
         messages.append({"role": "user", "content": state["input_text"]})
-        return {"messages": messages, "iteration": 0}
+        explicit_tool_calls = self._parse_tool_calls(state["input_text"])
+        return {
+            "messages": messages,
+            "response": state["input_text"],
+            "tool_calls": explicit_tool_calls,
+            "iteration": 0,
+        }
+
+    def route_after_prepare(self, state: AgentState) -> Literal["tools", "model"]:
+        """明确指定工具时直接执行，避免再次让模型决定同一工具。"""
+        if (
+            self.tool_client is not None
+            and state.get("tool_calls")
+            and state["max_tool_iterations"] > 0
+        ):
+            return "tools"
+        return "model"
 
     def model_node(self, state: AgentState) -> dict[str, Any]:
         response = self.llm.invoke(state["messages"])

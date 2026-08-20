@@ -1,6 +1,7 @@
 """OpenAI 兼容 LLM 服务模块。"""
 
 import os
+from time import perf_counter
 from typing import Any
 
 from openai import OpenAI
@@ -35,10 +36,14 @@ class OpenAICompatibleLLM:
             api_key=self.api_key,
             base_url=self.base_url,
             timeout=self.timeout,
+            # 旅行接口已经约定外部调用失败时直接返回失败，关闭 SDK 的两次
+            # 隐式重试，避免单次请求因连续超时被放大到数分钟。
+            max_retries=0,
         )
 
     def invoke(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
         """同步调用聊天补全接口，保持原有模型参数。"""
+        started_at = perf_counter()
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
@@ -51,8 +56,15 @@ class OpenAICompatibleLLM:
                     if key not in ("temperature", "max_tokens")
                 },
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            print(
+                "[PERF][LLM] "
+                f"elapsed={perf_counter() - started_at:.2f}s "
+                f"messages={len(messages)} response_chars={len(content or '')}"
+            )
+            return content
         except Exception as error:
+            print(f"[PERF][LLM] failed elapsed={perf_counter() - started_at:.2f}s")
             raise RuntimeError(f"LLM调用失败: {error}") from error
 
 # 全局LLM实例
